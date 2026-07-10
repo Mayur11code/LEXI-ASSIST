@@ -44,27 +44,36 @@ const initialCards = [
 
 export default function Home() {
   const [moved, setMoved] = useState<number[]>([]);
-  const [isMobile, setIsMobile] = useState(false);
+  const [scale, setScale] = useState(1);
 
   useEffect(() => {
-    const update = () => setIsMobile(window.innerWidth < 640);
+    const updateScale = () => {
+      const width = window.innerWidth;
 
-    update();
-    window.addEventListener("resize", update);
+      if (width < 640) {
+        setScale(0.45);
+      } else if (width < 1024) {
+        setScale(0.7);
+      } else {
+        setScale(1);
+      }
+    };
 
-    return () => window.removeEventListener("resize", update);
+    updateScale();
+
+    window.addEventListener("resize", updateScale);
+
+    return () => window.removeEventListener("resize", updateScale);
   }, []);
 
   const reveal = moved.length === initialCards.length;
 
   const markMoved = (id: number) => {
-    if (!moved.includes(id)) {
-      setMoved((prev) => [...prev, id]);
-    }
+    setMoved((prev) => (prev.includes(id) ? prev : [...prev, id]));
   };
 
   return (
-    <main className="relative flex h-screen w-screen overflow-hidden bg-[#0b0b0b] text-zinc-200">
+    <main className="relative min-h-screen w-full overflow-hidden bg-[#0b0b0b] text-zinc-200">
       {/* Background */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,#222_0%,#111_45%,#080808_100%)]" />
 
@@ -77,7 +86,7 @@ export default function Home() {
         }}
       />
 
-      {/* Top Left */}
+      {/* Logo */}
       <div className="absolute left-4 top-4 z-50 sm:left-6 sm:top-6 lg:left-10 lg:top-10">
         <h1 className="text-2xl font-light tracking-[0.22em] sm:text-3xl sm:tracking-[0.3em] lg:text-4xl lg:tracking-[0.35em]">
           LEXIASSIST
@@ -94,29 +103,12 @@ export default function Home() {
           Evidence moved
         </p>
 
-        <p className="mt-1 text-xl font-light sm:text-2xl lg:mt-2 lg:text-3xl">
+        <p className="mt-1 text-lg font-light sm:text-2xl lg:mt-2 lg:text-3xl">
           {moved.length}/{initialCards.length}
         </p>
       </div>
 
-      {/* Bottom Left */}
-      <div className="absolute bottom-4 left-4 z-50 max-w-[220px] text-zinc-500 sm:bottom-6 sm:left-6 lg:bottom-10 lg:left-10">
-        <p className="text-[10px] uppercase tracking-[0.22em] sm:text-xs">
-          Every case hides something.
-        </p>
-
-        <p className="mt-2 text-xs sm:text-sm">
-          Move every file.
-          <br />
-          Find the truth.
-        </p>
-
-        <div className="mt-3">
-          <IpBox />
-        </div>
-      </div>
-
-      {/* Truth */}
+      {/* Hero */}
       <div className="absolute inset-0 flex items-center justify-center px-4">
         <motion.div
           initial={{ opacity: 0 }}
@@ -164,8 +156,8 @@ export default function Home() {
           dragElastic={0.12}
           onDragStart={() => markMoved(card.id)}
           initial={{
-            x: isMobile ? card.x * 0.55 : card.x,
-            y: isMobile ? card.y * 0.55 : card.y,
+            x: card.x * scale,
+            y: card.y * scale,
             rotate: card.rot,
           }}
           whileDrag={{
@@ -174,7 +166,28 @@ export default function Home() {
             cursor: "grabbing",
             zIndex: 999,
           }}
-          className="absolute left-1/2 top-1/2 h-36 w-56 -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-md border border-zinc-800 bg-[#151515]/90 p-4 shadow-2xl backdrop-blur-sm sm:h-40 sm:w-64 sm:p-5 lg:h-44 lg:w-72"
+          className="
+            absolute
+            left-1/2
+            top-1/2
+            h-36
+            w-56
+            -translate-x-1/2
+            -translate-y-1/2
+            cursor-grab
+            rounded-md
+            border
+            border-zinc-800
+            bg-[#151515]/90
+            p-4
+            shadow-2xl
+            backdrop-blur-sm
+            sm:h-40
+            sm:w-64
+            sm:p-5
+            lg:h-44
+            lg:w-72
+          "
         >
           <div className="flex h-full flex-col justify-between">
             <div>
@@ -188,13 +201,31 @@ export default function Home() {
             </div>
 
             <div className="space-y-2">
-              <div className="h-[1px] w-full bg-zinc-800" />
-              <div className="h-[1px] w-5/6 bg-zinc-800" />
-              <div className="h-[1px] w-4/6 bg-zinc-800" />
+              <div className="h-px w-full bg-zinc-800" />
+              <div className="h-px w-5/6 bg-zinc-800" />
+              <div className="h-px w-4/6 bg-zinc-800" />
             </div>
           </div>
         </motion.div>
       ))}
+
+      {/* Bottom Left */}
+      <div className="absolute bottom-4 left-4 z-50 max-w-xs text-zinc-500 sm:bottom-6 sm:left-6 sm:max-w-sm lg:bottom-10 lg:left-10">
+        <p className="text-[10px] uppercase tracking-[0.22em] sm:text-xs">
+          Every case hides something.
+        </p>
+
+        <p className="mt-2 text-xs sm:text-sm">
+          Move every file.
+          <br />
+          Find the truth.
+        </p>
+      </div>
+
+      {/* Bottom Right */}
+      <div className="absolute bottom-4 right-4 z-50 sm:bottom-6 sm:right-6 lg:bottom-10 lg:right-10">
+        <IpBox />
+      </div>
 
       {/* Footer */}
       <div className="absolute bottom-2 left-1/2 -translate-x-1/2 px-4 text-center text-[10px] uppercase tracking-[0.25em] text-zinc-700 sm:bottom-4 sm:text-xs lg:bottom-8">
