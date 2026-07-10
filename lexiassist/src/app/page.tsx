@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { useState } from "react";
+import IPLol from "./ip";
 
 const initialCards = [
   {
@@ -88,6 +89,7 @@ export default function Home() {
           <br />
           Find the truth.
         </p>
+        <IPLol/>
       </div>
 
       {/* Counter */}
@@ -187,6 +189,7 @@ export default function Home() {
       <div className="absolute bottom-8 left-1/2 -translate-x-1/2 text-xs tracking-[0.35em] uppercase text-zinc-700">
         Nothing is ever hidden forever.
       </div>
+      
     </main>
   );
 }
