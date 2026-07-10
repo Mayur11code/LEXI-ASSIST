@@ -41,7 +41,7 @@ export default function IpBox() {
         </p>
 
         <p className="text-[11px] text-zinc-600">
-          jk, we're lawyers, not hackers.
+          Pack it up unc
         </p>
       </div>
     </div>
