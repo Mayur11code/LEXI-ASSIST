@@ -85,12 +85,12 @@ export default function ClientDashboard() {
     setIsLoading(true);
 
     try {
-      const response = await fetch("/api/agent/init", {
+      const response = await fetch("./api/agent/init", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: text,
-          clientId: "550e8400-e29b-41d4-a716-446655440000",
+          clientId: "d3fd3a29-5ef3-4763-80cc-6c4ea510a614",
           hasPdf: isPdfAttached,
           metadata: {},
         }),

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { NextResponse } from 'next/server';
 import { Client } from '@upstash/qstash';
 import { z } from 'zod';
+import {getBaseUrl} from "@/lib/tools/actions/getBaseurl"
 
 const qstashClient = new Client({ token: process.env.QSTASH_TOKEN! });
 
@@ -98,19 +99,7 @@ export async function POST(req: Request) {
     };
 
     // 6. Hardened Dynamic Host Resolution
-    const host = req.headers.get('x-forwarded-host') || req.headers.get('host');
-    const forwardedProto = req.headers.get('x-forwarded-proto');
-    
-    let protocol = 'https://';
-    if (host && (host.includes('localhost') || host.includes('127.0.0.1'))) {
-      protocol = 'http://';
-    } else if (forwardedProto) {
-      protocol = `${forwardedProto}://`;
-    }
-
-    const currentAppUrl = host 
-      ? `${protocol}${host}` 
-      : (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000');
+   const currentAppUrl = getBaseUrl(req);
 
     // 7. Routing Fork: PDF Pre-Processing vs Standard Loop
     if (hasPdf && fileUrl) {
