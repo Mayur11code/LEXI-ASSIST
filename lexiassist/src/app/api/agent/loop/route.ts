@@ -7,6 +7,7 @@ import Pusher from 'pusher';
 import { prisma } from '@/lib/prisma'; // Global Prisma singleton
 import { buildLegalAgenticSystemPrompt } from '@/lib/ai/prompts/agent-prompt';
 import { legalTools } from '@/lib/schemas/tools/legal-schemas';
+import { prisma } from '@/lib/prisma'; //Prisma Client
 
 const receiver = new Receiver({
   currentSigningKey: process.env.QSTASH_CURRENT_SIGNING_KEY!,
@@ -24,8 +25,7 @@ const pusher = new Pusher({
 export const maxDuration = 60; 
 
 export async function POST(req: Request) {
-  // Extract sessionId early so the catch block can update the DB if an error occurs
-  let activeSessionId = '';
+  let activeSessionId: string | null = null; // Track session ID for error handling
 
   try {
     const signature = req.headers.get('upstash-signature');

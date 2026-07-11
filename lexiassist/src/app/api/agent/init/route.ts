@@ -1,8 +1,8 @@
 // src/app/api/agent/init/route.ts
+import { prisma } from '@/lib/prisma';
 import { NextResponse } from 'next/server';
 import { Client } from '@upstash/qstash';
 import { z } from 'zod';
-import {prisma} from "@/lib/prisma"
 
 const qstashClient = new Client({ token: process.env.QSTASH_TOKEN! });
 
@@ -33,9 +33,10 @@ export async function POST(req: Request) {
       );
     }
 
-const { prompt, clientId, sessionId: incomingSessionId, fileUrl, hasPdf, metadata } = parsedData.data;
+    const { prompt, clientId, sessionId: incomingSessionId, fileUrl, hasPdf, metadata } = parsedData.data;
 
-const newUserMessage = {
+    // 3. Format the new user message
+    const newUserMessage = {
       role: 'user',
       content: hasPdf && fileUrl 
         ? `${prompt}\n\n[Attached File URL: ${fileUrl}]` 
@@ -44,7 +45,6 @@ const newUserMessage = {
 
     let activeSessionId = incomingSessionId;
     let messagesHistory: any[] = [];
-
 
     // 4. State Rehydration & DB Operations
     if (activeSessionId) {
@@ -88,7 +88,7 @@ const newUserMessage = {
       activeSessionId = newSession.id;
     }
 
-// 5. Construct Queue Payload for the Hot Network Loop
+    // 5. Construct Queue Payload for the Hot Network Loop
     const queuePayload = {
       sessionId: activeSessionId,
       clientId,
@@ -97,7 +97,7 @@ const newUserMessage = {
       messages: messagesHistory, // Full context passed to Gemini
     };
 
-    // 4. Hardened Dynamic Host Resolution
+    // 6. Hardened Dynamic Host Resolution
     const host = req.headers.get('x-forwarded-host') || req.headers.get('host');
     const forwardedProto = req.headers.get('x-forwarded-proto');
     
@@ -112,7 +112,7 @@ const newUserMessage = {
       ? `${protocol}${host}` 
       : (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000');
 
-    // 5. Routing Fork: PDF Pre-Processing vs Standard Loop
+    // 7. Routing Fork: PDF Pre-Processing vs Standard Loop
     if (hasPdf && fileUrl) {
       console.log(`[INIT] File detected. Dispatching Session ${activeSessionId} to PDF Parser.`);
       await qstashClient.publishJSON({
@@ -129,11 +129,11 @@ const newUserMessage = {
       });
     }
 
-    // 6. Asynchronous 202 Release
+    // 8. Asynchronous 202 Release
     return NextResponse.json(
       { 
         message: 'Legal intake process accepted and queued.', 
-        activeSessionId 
+        sessionId: activeSessionId 
       },
       { status: 202 } 
     );
