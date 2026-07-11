@@ -20,63 +20,80 @@ enum CaseStatus {
 }
 
 model User {
-  id            String         @id @default(uuid())
-  email         String         @unique
+  id            String          @id @default(uuid())
+  email         String          @unique
   name          String?
-  role          UserRole       @default(CLIENT)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  role          UserRole        @default(CLIENT)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
   
   // Relations
   lawyerProfile LawyerProfile?
-  clientCases   CaseBrief[]    @relation("ClientCases")
+  clientCases   CaseBrief[]     @relation("ClientCases")
+  
+  @@index([email])
+  @@index([role])
 }
 
 model LawyerProfile {
-  id             String        @id @default(uuid())
-  userId         String        @unique
-  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  specialization String[]      // e.g., ["Corporate", "Family Law"]
-  jurisdiction   String        // Geographic matching region
+  id             String         @id @default(uuid())
+  userId         String         @unique
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  specialization String[]       // e.g., ["Corporate", "Family Law"]
+  jurisdiction   String         // Geographic matching region
   experienceYrs  Int
-  isAvailable    Boolean       @default(true)
+  isAvailable    Boolean        @default(true)
   
   // Relations
-  assignedCases  CaseBrief[]   @relation("LawyerCases")
+  assignedCases  CaseBrief[]    @relation("LawyerCases")
+
+  // Indexes specific to Lawyer searches
+  @@index([userId])
+  @@index([jurisdiction])
+  @@index([isAvailable])
 }
 
 model CaseBrief {
-  id             String        @id @default(uuid())
+  id             String         @id @default(uuid())
   clientId       String
-  client         User          @relation("ClientCases", fields: [clientId], references: [id])
+  client         User           @relation("ClientCases", fields: [clientId], references: [id])
   lawyerId       String?
   lawyer         LawyerProfile? @relation("LawyerCases", fields: [lawyerId], references: [id])
   
   title          String
-  rawDescription String        @db.Text
-  status         CaseStatus    @default(TRIAGE)
+  rawDescription String         @db.Text
+  status         CaseStatus     @default(TRIAGE)
   
   // AI Generated Structured Outputs stored safely as JSON
-  aiTimeline     Json?         // Structured chronological array of events
-  aiEntities     Json?         // Extracted names, business names, dates
-  aiRiskAnalysis Json?         // Key legal vulnerabilities identified by LLM
+  aiTimeline     Json?          // Structured chronological array of events
+  aiEntities     Json?          // Extracted names, business names, dates
+  aiRiskAnalysis Json?          // Key legal vulnerabilities identified by LLM
   estimatedValue Float?
   
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
   
   // Relations
   consultations  Consultation[]
+
+  // Indexes correctly placed for Case queries
+  @@index([clientId])
+  @@index([lawyerId])
+  @@index([status])
 }
 
 model Consultation {
-  id          String     @id @default(uuid())
-  caseBriefId String
-  caseBrief   CaseBrief  @relation(fields: [caseBriefId], references: [id], onDelete: Cascade)
+  id           String     @id @default(uuid())
+  caseBriefId  String
+  caseBrief    CaseBrief  @relation(fields: [caseBriefId], references: [id], onDelete: Cascade)
   
-  webrtcRoomId String    @unique // Unique meeting identifier for frontend matching
+  webrtcRoomId String     @unique // Unique meeting identifier for frontend matching
   scheduledAt  DateTime
   isCompleted  Boolean    @default(false)
   
-  createdAt   DateTime   @default(now())
+  createdAt    DateTime   @default(now())
+
+  // Indexes for WebRTC and case lookups
+  @@index([caseBriefId])
+  @@index([webrtcRoomId])
 }
