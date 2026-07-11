@@ -97,3 +97,18 @@ model Consultation {
   @@index([caseBriefId])
   @@index([webrtcRoomId])
 }
+
+model AgentSession {
+  id        String   @id @default(uuid())
+  clientId  String   // Ties to the User
+  status    String   @default("PROCESSING") // Can be PROCESSING, COMPLETED, or FAILED
+  content   String?  @db.Text // Where the final AI response goes
+  metadata  Json?    // Stores what step the AI is on
+  messages  Json?    // for conversation history
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId])
+  @@index([status])
+}
