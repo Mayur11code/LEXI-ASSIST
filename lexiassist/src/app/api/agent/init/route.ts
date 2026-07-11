@@ -1,4 +1,5 @@
 // src/app/api/agent/init/route.ts
+import { prisma } from '@/lib/prisma';
 import { NextResponse } from 'next/server';
 import { Client } from '@upstash/qstash';
 import { z } from 'zod';
@@ -33,8 +34,13 @@ export async function POST(req: Request) {
 
     const { prompt, clientId, fileUrl, hasPdf, metadata } = parsedData.data;
 
-    // TODO: Replace with actual global DB session creation
-    const sessionId = crypto.randomUUID(); 
+    const session = await prisma.agentSession.create({
+      data: {
+        clientId: clientId,
+        status: "PROCESSING",
+      }
+    });
+    const sessionId = session.id; 
 
     // 3. Construct Queue Payload
     const queuePayload = {

@@ -5,6 +5,7 @@ import { generateText } from 'ai';
 import { google } from '@ai-sdk/google';
 import { buildLegalAgenticSystemPrompt } from '@/lib/ai/prompts/agent-prompt';
 import { legalTools } from '@/lib/schemas/tools/legal-schemas';
+import { prisma } from '@/lib/prisma'; //Prisma Client
 
 const receiver = new Receiver({
   currentSigningKey: process.env.QSTASH_CURRENT_SIGNING_KEY!,
@@ -14,6 +15,8 @@ const receiver = new Receiver({
 export const maxDuration = 60; 
 
 export async function POST(req: Request) {
+  let activeSessionId: string | null = null; // Track session ID for error handling
+
   try {
     // 1. Enforce Zero-Trust Signature Verification
     const signature = req.headers.get('upstash-signature');
@@ -31,11 +34,18 @@ export async function POST(req: Request) {
     // 2. Parse Stateless Payload
     const payload = JSON.parse(rawBody);
     const { sessionId, clientId, messages, currentStep, metadata } = payload;
+    activeSessionId = sessionId; // Set it once we parse it successfully
     
     // 3. Circuit Breaker Mechanism
     const MAX_STEPS = 5;
     if (currentStep >= MAX_STEPS) {
       console.warn(`[LOOP] Circuit breaker activated for Session: ${sessionId}`);
+      
+      // Tell the frontend the session failed due to timeout
+      await prisma.agentSession.update({
+        where: { id: sessionId },
+        data: { status: 'FAILED' }
+      });
       return new Response('Max step safety ceiling hit', { status: 200 });
     }
 
@@ -124,7 +134,7 @@ The user has requested a "legal risk assessment". You MUST execute the 'generate
           sessionId,
           clientId,
           messages: updatedMessages,
-          toolCalls: mappedToolCalls, // Passing the array instead of a single object
+          toolCalls: mappedToolCalls,
           currentStep: currentStep + 1,
           metadata,
         }),
@@ -139,23 +149,41 @@ The user has requested a "legal risk assessment". You MUST execute the 'generate
       const clientSafeText = text.replace(/<scratchpad>[\s\S]*?<\/scratchpad>/g, '').trim();
       console.log(`[LOOP] Execution complete. Session: ${sessionId}`);
       
-      return NextResponse.json({
-        status: 'success',
-        sessionId,
-        content: clientSafeText,
-        metadata: {
-          step: currentStep,
-          timestamp: new Date().toISOString()
+      // Agent is finished! Write the response to the Neon Database
+      await prisma.agentSession.update({
+        where: { id: sessionId },
+        data: {
+          status: "COMPLETED",
+          content: clientSafeText,
         }
-      }, { status: 200 });
+      });
+      
+      // Return a basic 200 to QStash to acknowledge the webhook is done
+      return new Response('Execution complete and saved to DB', { status: 200 });
       
     } else {
       console.warn(`[LOOP] Unexpected finishReason encountered: ${finishReason}`);
+      
+      // Update DB on weird constraint failures
+      await prisma.agentSession.update({
+        where: { id: sessionId },
+        data: { status: 'FAILED' }
+      });
+      
       return new Response('Execution interrupted by model constraints', { status: 200 });
     }
 
   } catch (error: any) {
     console.error('[LOOP_ERROR] Core orchestration failure:', error);
+    
+    //Ensure the frontend knows the background worker crashed
+    if (activeSessionId) {
+      await prisma.agentSession.update({
+        where: { id: activeSessionId },
+        data: { status: 'FAILED' }
+      }).catch(() => console.error('Secondary failure: Could not update DB error status'));
+    }
+
     return NextResponse.json(
       { error: error?.message ?? 'Internal loop engine failure' },
       { status: 500 }
