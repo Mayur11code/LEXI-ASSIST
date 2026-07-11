@@ -37,6 +37,9 @@ export const generatePreBriefRiskSchema = z.object({
   primaryLegalRisks: z.array(z.string()).min(1).describe(
     'A list of the immediate legal vulnerabilities or statutory risks identified in the user narrative.'
   ),
+  caseSummary: z.string().min(20).describe(
+   'An objective, consolidated summary of the case synthesized from the full conversation history — not a single message, but the coherent narrative across all turns.'
+ ),
   statuteOfLimitationsWarning: z.boolean().describe(
     'Set to true if dates in the chronology indicate a rapidly approaching filing deadline.'
   )

@@ -85,7 +85,7 @@ export default function ClientDashboard() {
     setIsLoading(true);
 
     try {
-      const response = await fetch("/api/agent/init", {
+      const response = await fetch("./api/agent/init", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
