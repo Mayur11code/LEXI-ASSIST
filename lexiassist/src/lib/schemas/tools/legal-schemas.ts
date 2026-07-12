@@ -2,6 +2,17 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 
+
+// Stored shape in CaseBrief.aiTimeline — NOT the tool's input schema.
+// `verified` is computed server-side in executeExtractCaseChronology, never
+// supplied by the model, since the model can't be trusted to self-report this.
+type StoredKeyEvent = {
+  eventDate: string;
+  description: string;
+  verifiableSourceCitation: string;
+  verified: boolean;
+};
+
 /**
  * 1. THE INTAKE PARALEGAL: Automated Case Chronology
  * Extracts the "Who, What, Where, When" from disorganized text and documents to build a verified timeline.
