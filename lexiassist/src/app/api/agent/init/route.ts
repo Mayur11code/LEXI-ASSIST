@@ -12,7 +12,7 @@ const InitRequestSchema = z.object({
   prompt: z.string().min(1, "Prompt cannot be empty"),
   clientId: z.string().uuid("Invalid Client ID"),
   sessionId: z.string().uuid("Invalid Session ID").optional(), // Pass this to continue a chat
-  caseBriefId: z.string().uuid("Invalid Case Brief ID").optional(),
+  caseBriefId: z.string().uuid("Invalid Case Brief ID"),
   fileUrl: z.string().url("Invalid File URL").optional(),
   hasPdf: z.boolean().default(false),
   metadata: z.object({
