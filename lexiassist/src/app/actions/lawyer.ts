@@ -6,6 +6,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth.config";
 import { revalidatePath } from "next/cache";
 
+//LAWYER ONBOARDING (Your existing function
 export async function onboardLawyer(formData: {
   specialization: string[];
   jurisdiction: string;
@@ -50,5 +51,25 @@ export async function onboardLawyer(formData: {
         ? "A professional lawyer profile already exists for this account record." 
         : "Failed to map operational profile onto the orchestration layer." 
     };
+  }
+}
+
+// 2. CASE ASSIGNMENT (function for Tab 2)
+export async function assignLawyerToCase(caseBriefId: string, lawyerId: string) {
+  try {
+    await prisma.caseBrief.update({
+      where: { id: caseBriefId },
+      data: { 
+        lawyerId,
+        status: "MATCHED" 
+      },
+    });
+
+    // Force Next.js to purge cache so the dashboard immediately reflects the MATCHED status
+    revalidatePath("/dashboard");
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to assign lawyer:", error);
+    return { success: false, error: "Database mapping failed." };
   }
 }
