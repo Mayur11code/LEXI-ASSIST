@@ -6,15 +6,15 @@ import { motion, AnimatePresence } from "framer-motion";
 import { assignLawyerToCase } from "@/app/actions/lawyer";
 import { useSession } from "next-auth/react";
 import { getChatHistory } from "@/app/actions/chat";
+import { saveDocumentRecord } from "@/app/actions/document";
 import { getPusherClient } from "@/lib/pusher/client";
 import { Loader2, Terminal, CheckCircle2, ShieldAlert } from "lucide-react";
 import { useUploadThing } from "@/utils/uploadthing";
 import { useAgentSession } from "@/hooks/useAgentSession";
 
-// 1. UTILITIES & PARSERS
 function tryParseLawyerPayload(content: string) {
   if (typeof content !== 'string') return null;
-  const extractReason = (data: any) => data?.reason || data?.matches?.reason || "No available attorneys found for this criteria.";
+  const extractReason = (data: any) => data?.reason || data?.matches?.reason || "No available attorneys found for this specific criteria.";
 
   try {
     const jsonBlocks = [...content.matchAll(/```json\s*([\s\S]*?)\s*```/g)];
@@ -29,9 +29,11 @@ function tryParseLawyerPayload(content: string) {
       } catch (e) {}
     }
     const cleanContent = content.replace(/```json\n?|\n?```/g, "").trim();
-    const fallbackData = JSON.parse(cleanContent);
-    if (fallbackData?.matchFound === true && Array.isArray(fallbackData?.matches)) return { type: "MATCH", data: fallbackData.matches };
-    if (fallbackData?.matchFound === false) return { type: "NO_MATCH", reason: extractReason(fallbackData) };
+    if (cleanContent.startsWith("{") || cleanContent.startsWith("[")) {
+      const fallbackData = JSON.parse(cleanContent);
+      if (fallbackData?.matchFound === true && Array.isArray(fallbackData?.matches)) return { type: "MATCH", data: fallbackData.matches };
+      if (fallbackData?.matchFound === false) return { type: "NO_MATCH", reason: extractReason(fallbackData) };
+    }
   } catch (e) { return null; }
   return null;
 }
@@ -68,7 +70,6 @@ function LawyerSelectionCard({ lawyers, onSelect, isSelecting }: any) {
   );
 }
 
-// Sleek new thinking UI
 function AgentExecutionLoader({ realTimeStep }: { realTimeStep?: string }) {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} className="flex justify-start w-full my-4">
@@ -85,7 +86,6 @@ function AgentExecutionLoader({ realTimeStep }: { realTimeStep?: string }) {
   );
 }
 
-// 2. MAIN CHAT INTERFACE
 interface ChatInterfaceProps {
   activeCaseId: string;
   cases: { id: string; title: string; status: string }[];
@@ -93,21 +93,21 @@ interface ChatInterfaceProps {
 }
 
 export default function ChatInterface({ activeCaseId, cases, onSwitchCase }: ChatInterfaceProps) {
-  const router = useRouter(); // Initialize router for data refreshing
+  const router = useRouter();
   const { data: session } = useSession();
   const clientId = (session?.user as any)?.id;
 
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<{ id: string; role: string; content: any }[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  
-  // Centralized loading states
+  const [currentDocumentId, setCurrentDocumentId] = useState<string | null>(null);
+
   const [isFetchingHistory, setIsFetchingHistory] = useState(false);
   const [isInjecting, setIsInjecting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isAwaitingResponse, setIsAwaitingResponse] = useState(false);
   
-  const [attachedFile, setAttachedFile] = useState<{url: string, name: string} | null>(null);
+  const [attachedFile, setAttachedFile] = useState<{url: string, name: string, id: string} | null>(null);
   const { startUpload, isUploading } = useUploadThing("pdfUploader");
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -147,10 +147,11 @@ export default function ChatInterface({ activeCaseId, cases, onSwitchCase }: Cha
         }
         setIsLoading(false);
         setIsAwaitingResponse(false);
-        router.refresh(); // Tells Next.js to fetch the new DB data instantly
+        window.dispatchEvent(new Event('refresh-case-data'));
+        router.refresh(); 
       } 
       else if (data.status === "FAILED") {
-        setMessages((prev) => [...prev, { id: Date.now().toString(), role: "assistant", content: `[System Error]: ${data.error || data.content || "Orchestration engine failure. (Possible API Rate Limit)"}` }]);
+        setMessages((prev) => [...prev, { id: Date.now().toString(), role: "assistant", content: `[System Error]: ${data.error || data.content || "Orchestration engine failure."}` }]);
         setIsLoading(false);
         setIsAwaitingResponse(false);
       }
@@ -162,15 +163,13 @@ export default function ChatInterface({ activeCaseId, cases, onSwitchCase }: Cha
     };
   }, [activeSessionId, router]);
 
-  // Reset ALL interaction blockers when a new case is selected
   useEffect(() => {
     const fetchHistory = async () => {
       setIsFetchingHistory(true);
       setMessages([]); 
       setActiveSessionId(null); 
       setAttachedFile(null);
-      
-      // Unlock the input area explicitly
+      setCurrentDocumentId(null); 
       setIsLoading(false);
       setIsAwaitingResponse(false);
       setIsInjecting(false);
@@ -185,8 +184,6 @@ export default function ChatInterface({ activeCaseId, cases, onSwitchCase }: Cha
         }));
         setMessages(historicalMessages);
         setActiveSessionId(result.sessionId || null);
-      } else {
-        setMessages([{ id: "error", role: "assistant", content: "[System Error]: Failed to retrieve encrypted session history." }]);
       }
       setIsFetchingHistory(false);
     };
@@ -196,13 +193,25 @@ export default function ChatInterface({ activeCaseId, cases, onSwitchCase }: Cha
   const submitMessage = async (text: string, isSilentInjection: boolean = false) => {
     if ((!text.trim() && !attachedFile) || isAgentLoading || !clientId || isUploading) return;
 
-    const finalPrompt = attachedFile ? `${text}\n\n[Attached File URL: ${attachedFile.url}]` : text;
+    let apiPrompt = text.trim();
+    
+    if (attachedFile) {
+      apiPrompt += `\n\n[Attachment Name: ${attachedFile.name}]`;
+      apiPrompt += `\n[Attached File URL: ${attachedFile.url}]`;
+      setCurrentDocumentId(attachedFile.id); 
+    }
+
+    const docIdToUse = attachedFile?.id || currentDocumentId;
+    apiPrompt += `\n\n[STRICT SYSTEM INSTRUCTIONS]:\n`;
+    if (activeSessionId) apiPrompt += `- caseSessionId: "${activeSessionId}"\n`;
+    if (docIdToUse) apiPrompt += `- documentId: "${docIdToUse}"\n`;
+    apiPrompt += `- RULES: If you execute Chronology or Redlines tools, do it silently (do not output the results in text). HOWEVER, if you execute the 'matchVerifyLawyer' tool, you MUST output the raw JSON result inside a \`\`\`json block so the UI can render the selection cards.`;
 
     if (!isSilentInjection) {
-      const userMsg = { id: Date.now().toString(), role: "user", content: finalPrompt };
+      const userMsg = { id: Date.now().toString(), role: "user", content: apiPrompt };
       setMessages((prev) => [...prev, userMsg]);
       setInput("");
-      setAttachedFile(null);
+      setAttachedFile(null); 
     } else {
       setIsInjecting(true);
     }
@@ -212,7 +221,7 @@ export default function ChatInterface({ activeCaseId, cases, onSwitchCase }: Cha
 
     try {
       const payload: any = {
-        prompt: finalPrompt,
+        prompt: apiPrompt,
         clientId: clientId,
         caseBriefId: activeCaseId, 
         hasPdf: !!attachedFile,
@@ -231,28 +240,30 @@ export default function ChatInterface({ activeCaseId, cases, onSwitchCase }: Cha
       const data = await response.json();
 
       if (response.status === 202) {
-        setActiveSessionId(data.sessionId);
+        if (!activeSessionId) setActiveSessionId(data.sessionId);
       } else {
         setIsLoading(false);
+        setIsAwaitingResponse(false);
+        if (isSilentInjection) setIsInjecting(false);
         setMessages((prev) => [...prev, { id: Date.now().toString(), role: "assistant", content: `[System Error]: ${data.error || "Payload rejected."}` }]);
       }
     } catch (error) {
       setIsLoading(false);
-      setMessages((prev) => [...prev, { id: Date.now().toString(), role: "assistant", content: "[System Error]: Network Error." }]);
-    } finally {
+      setIsAwaitingResponse(false);
       if (isSilentInjection) setIsInjecting(false);
-    }
+      setMessages((prev) => [...prev, { id: Date.now().toString(), role: "assistant", content: "[System Error]: Network routing failure." }]);
+    } 
   };
 
   const handleLawyerSelect = async (lawyerId: string, lawyerName: string) => {
     setIsInjecting(true);
     setIsLoading(true);
-
     const result = await assignLawyerToCase(activeCaseId, lawyerId);
     
     if (result.success) {
       setMessages((prev) => [...prev, { id: Date.now().toString(), role: "assistant", content: `[System]: Attorney ${lawyerName} has been officially secured for this case.` }]);
-      await submitMessage(`[SYSTEM INSTRUCTION]: The user has selected Attorney ${lawyerName} (ID: ${lawyerId}). Acknowledge this choice briefly and ask the user to upload their legal document for PDF parsing and redline generation.`, true);
+      await submitMessage(`[SYSTEM INSTRUCTION]: The user has officially retained Attorney ${lawyerName} (ID: ${lawyerId}). Acknowledge this choice professionally and state that you are preparing the final case matrix.`, true);
+      window.dispatchEvent(new Event('refresh-case-data'));
     } else {
       setMessages((prev) => [...prev, { id: Date.now().toString(), role: "assistant", content: "[System Error]: Failed to secure attorney in the database." }]);
       setIsInjecting(false);
@@ -273,9 +284,8 @@ export default function ChatInterface({ activeCaseId, cases, onSwitchCase }: Cha
   };
 
   return (
-    <div className="relative h-175 w-full overflow-hidden bg-[#0c0c0e] text-zinc-200 font-sans flex flex-col rounded-2xl selection:bg-zinc-800 border border-zinc-800/60">
+    <div className="relative h-175 w-full overflow-hidden bg-[#0c0c0e] text-zinc-200 font-sans flex flex-col rounded-2xl selection:bg-zinc-800 border border-zinc-800/60 shadow-2xl">
       
-      {/* DROPDOWN HEADER */}
       <div className="border-b border-zinc-800/60 p-4 bg-[#08080a] flex justify-between items-center shrink-0 z-20">
         <div className="relative group">
           <select 
@@ -302,7 +312,6 @@ export default function ChatInterface({ activeCaseId, cases, onSwitchCase }: Cha
         </div>
       </div>
 
-      {/* CHAT CANVAS */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-zinc-800">
         
         {isFetchingHistory ? (
@@ -320,7 +329,7 @@ export default function ChatInterface({ activeCaseId, cases, onSwitchCase }: Cha
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
               {[
                 "Review this employment contract for unfair non-compete clauses.",
-                "Draft a legally binding Non-Disclosure Agreement (NDA).",
+                "Review this loan agreement for predatory banking clauses.", 
                 "Analyze this eviction notice and check tenant rights.",
                 "Extract a chronological timeline from these case files."
               ].map((prompt, i) => (
@@ -334,7 +343,6 @@ export default function ChatInterface({ activeCaseId, cases, onSwitchCase }: Cha
 
         <AnimatePresence>
           {messages.map((m) => {
-            // Catch PDF Injection Block
             if (typeof m.content === "string" && m.content.includes("[DOCUMENT CONTENT extracted")) {
               return (
                 <motion.div key={m.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex justify-center w-full my-4">
@@ -382,26 +390,44 @@ export default function ChatInterface({ activeCaseId, cases, onSwitchCase }: Cha
               );
             }
 
-            // Clean up LLM syntax blocks for clean rendering
             let displayContent = m.content;
             let hasAttachment = false;
+            let attachmentName = "Document.pdf"; // Fallback text
 
             if (typeof m.content === "string") {
               displayContent = displayContent.replace(/<scratchpad>[\s\S]*?<\/scratchpad>/gi, '').trim();
               displayContent = displayContent.replace(/```json[\s\S]*?```/gi, '').trim();
               
-              if (displayContent.includes("[Attached File URL:")) {
-                hasAttachment = true;
-                displayContent = displayContent.replace(/\[Attached File URL:.*?\]/g, '').trim();
+              //  EXTRACT NEW FORMAT
+              const nameMatch = displayContent.match(/\[Attachment Name:\s*(.*?)\]/i);
+              if (nameMatch && nameMatch[1]) {
+                attachmentName = nameMatch[1].trim();
               }
+
+              //  EXTRACT LEGACY FORMAT (Prevents older chat histories from breaking)
+              const legacyMatch = displayContent.match(/📎 Attached Document:\s*(.*)/i);
+              if (legacyMatch && legacyMatch[1]) {
+                attachmentName = legacyMatch[1].trim();
+                hasAttachment = true;
+                displayContent = displayContent.replace(/📎 Attached Document:.*?(\n|$)/gim, '').trim();
+              }
+              
+              // Scrub tags out of the visual text
+              if (displayContent.includes("[Attached File URL:") || displayContent.includes("[Attachment Name:")) {
+                hasAttachment = true;
+                displayContent = displayContent.replace(/\[Attached File URL:.*?\]/gi, '').trim();
+                displayContent = displayContent.replace(/\[Attachment Name:.*?\]/gi, '').trim();
+              }
+              
+              // AGGRESSIVE CLEANUP: Destroy backend-saved system instructions
+              displayContent = displayContent.replace(/\[STRICT SYSTEM INSTRUCTIONS\]:?[\s\S]*/gi, '').trim();
+              displayContent = displayContent.replace(/\[SYSTEM INSTRUCTION\]:?[\s\S]*/gi, '').trim();
+              displayContent = displayContent.replace(/\[SYSTEM INSTRUCTION:.*?\]/gi, '').trim();
             }
 
-            if (typeof m.content === "string" && (displayContent.startsWith("[SYSTEM INSTRUCTION]") || displayContent.startsWith("[SYSTEM EVENT]"))) return null;
-            if (!displayContent && !hasAttachment && m.role === "assistant") return null;
-            
-            if (!displayContent && hasAttachment && m.role === "user") {
-              displayContent = "📎 Document uploaded for analysis.";
-            }
+            // HIDE GHOST BUBBLES
+            if (typeof m.content === "string" && (displayContent.startsWith("[SYSTEM EVENT]"))) return null;
+            if (!displayContent && !hasAttachment) return null;
 
             return (
               <motion.div key={m.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`flex w-full ${m.role === "user" ? "justify-end" : "justify-start"}`}>
@@ -409,25 +435,36 @@ export default function ChatInterface({ activeCaseId, cases, onSwitchCase }: Cha
                   <span className="text-[9px] font-mono tracking-widest text-zinc-500 uppercase px-2">
                     {m.role === "user" ? "Client" : "LexiAssist"}
                   </span>
+
+                  {/* SLEEK BADGE INJECTED ABOVE TEXT BUBBLE */}
+                  {hasAttachment && m.role === "user" && (
+                    <div className="flex items-center gap-2 mb-1 px-3 py-2 bg-zinc-800/40 border border-zinc-700/50 rounded-xl text-[11px] font-mono text-zinc-300 shadow-sm backdrop-blur-sm">
+                      <svg className="w-3.5 h-3.5 text-emerald-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                      </svg>
+                      <span className="truncate max-w-50">{attachmentName}</span>
+                    </div>
+                  )}
                   
-                  {/* Clean typography class applied here */}
-                  <div className={`p-5 text-sm sm:text-[15px] leading-relaxed shadow-sm transition-all whitespace-pre-wrap wrap-break-word text-left
-                    ${m.role === "user" 
-                      ? "bg-zinc-800/80 border border-zinc-700/50 rounded-2xl rounded-tr-sm text-zinc-100" 
-                      : "bg-[#08080a] border border-zinc-800/60 rounded-2xl rounded-tl-sm text-zinc-300"}`}
-                  >
-                    {typeof displayContent === "string" ? (
-                      displayContent
-                    ) : (
-                      // Tool Call Visualizer
-                      <div className="flex items-center gap-3 bg-zinc-900/50 border border-zinc-800/80 rounded-lg px-4 py-3 shadow-inner">
-                        <Terminal className="w-4 h-4 text-emerald-500" />
-                        <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">
-                          Executing System Utility...
-                        </span>
-                      </div>
-                    )}
-                  </div>
+                  {/* CONDITIONAL TEXT BUBBLE RENDERING */}
+                  {displayContent && (
+                    <div className={`p-5 text-sm sm:text-[15px] leading-relaxed shadow-sm transition-all whitespace-pre-wrap wrap-break-word text-left
+                      ${m.role === "user" 
+                        ? "bg-zinc-800/80 border border-zinc-700/50 rounded-2xl rounded-tr-sm text-zinc-100" 
+                        : "bg-[#08080a] border border-zinc-800/60 rounded-2xl rounded-tl-sm text-zinc-300"}`}
+                    >
+                      {typeof displayContent === "string" ? (
+                        displayContent
+                      ) : (
+                        <div className="flex items-center gap-3 bg-zinc-900/50 border border-zinc-800/80 rounded-lg px-4 py-3 shadow-inner">
+                          <Terminal className="w-4 h-4 text-emerald-500" />
+                          <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest">
+                            Executing System Utility...
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </motion.div>
             );
@@ -439,13 +476,12 @@ export default function ChatInterface({ activeCaseId, cases, onSwitchCase }: Cha
         <div ref={messagesEndRef} />
       </div>
 
-      {/* INPUT ARENA */}
-      <div className="p-4 sm:p-6 pt-2 bg-[#08080a] shrink-0 border-t border-zinc-800/60">
+      <div className="p-4 sm:p-6 pt-2 bg-[#08080a] shrink-0 border-t border-zinc-800/60 z-20">
         {attachedFile && (
-          <div className="mb-3 px-3 py-1.5 bg-emerald-950/30 border border-emerald-900/50 rounded-md w-fit flex items-center gap-2 text-[10px] text-emerald-500 font-mono">
+          <div className="mb-3 px-3 py-1.5 bg-emerald-950/30 border border-emerald-900/50 rounded-md w-fit flex items-center gap-2 text-[10px] text-emerald-500 font-mono shadow-sm">
             <CheckCircle2 className="w-3 h-3" />
             {attachedFile.name} attached
-            <button onClick={() => setAttachedFile(null)} className="ml-2 text-zinc-500 hover:text-rose-400">✕</button>
+            <button onClick={() => setAttachedFile(null)} className="ml-2 text-zinc-500 hover:text-rose-400 transition-colors">✕</button>
           </div>
         )}
         
@@ -459,9 +495,20 @@ export default function ChatInterface({ activeCaseId, cases, onSwitchCase }: Cha
               onChange={async (e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
+                
                 const res = await startUpload([file]);
                 if (res && res[0]) {
-                  setAttachedFile({ url: res[0].url, name: res[0].name });
+                  const safeUrl = (res[0] as any).ufsUrl || res[0].url; 
+                  
+                  const dbRes = await saveDocumentRecord(safeUrl, activeCaseId);
+                  
+                  if (dbRes.success && dbRes.document) {
+                    const docId = dbRes.document.id;
+                    setAttachedFile({ url: safeUrl, name: res[0].name, id: docId });
+                    setCurrentDocumentId(docId); 
+                  } else {
+                    setMessages(prev => [...prev, { id: Date.now().toString(), role: "assistant", content: "[System Error]: Failed to register document in database." }]);
+                  }
                 }
               }} 
             />
@@ -488,7 +535,7 @@ export default function ChatInterface({ activeCaseId, cases, onSwitchCase }: Cha
           <button
             type="submit"
             disabled={isAgentLoading || (!input.trim() && !attachedFile) || !clientId || isUploading}
-            className="shrink-0 h-11 w-11 flex items-center justify-center bg-zinc-200 hover:bg-white text-zinc-900 rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+            className="shrink-0 h-11 w-11 flex items-center justify-center bg-zinc-200 hover:bg-white text-zinc-900 rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed shadow-md"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
