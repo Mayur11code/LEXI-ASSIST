@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { getCaseData } from "@/app/actions/getCaseData"; 
+import { getCaseDocument } from "@/app/actions/document"; 
 import { Loader2, AlertTriangle, ShieldCheck, FileText, CheckCircle2 } from "lucide-react";
 
 interface FlaggedClause {
@@ -21,15 +21,14 @@ export default function RedlineViewer({ activeCaseId }: { activeCaseId: string }
   const fetchDocument = useCallback(async () => {
     setIsLoading(true);
     try {
-      // Utilizing the server action you provided
-      const result = await getCaseData(activeCaseId);
-      
-      if (result.success && result.data && result.data.documents && result.data.documents.length > 0) {
-        // Grab the most recently uploaded document for this case
-        const latestDoc = result.data.documents.sort(
-          (a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        )[0];
-        setDocumentData(latestDoc);
+      const result = await getCaseDocument(activeCaseId);
+      if (result.success && result.document) {
+        let doc = result.document;
+        if (typeof doc.redlines === 'string') {
+          try { doc.redlines = JSON.parse(doc.redlines); } 
+          catch (e) { doc.redlines = []; }
+        }
+        setDocumentData(doc);
       } else {
         setDocumentData(null);
       }
@@ -40,11 +39,19 @@ export default function RedlineViewer({ activeCaseId }: { activeCaseId: string }
     }
   }, [activeCaseId]);
 
+  // Hook 1: Initial fetch
   useEffect(() => {
-    if (activeCaseId) {
-      fetchDocument();
-    }
+    if (activeCaseId) fetchDocument();
   }, [activeCaseId, fetchDocument]);
+
+  // Hook 2: Global listener (MUST BE ABOVE EARLY RETURNS)
+  useEffect(() => {
+    const handleRefresh = () => {
+      fetchDocument();
+    };
+    window.addEventListener('refresh-case-data', handleRefresh);
+    return () => window.removeEventListener('refresh-case-data', handleRefresh);
+  }, [fetchDocument]);
 
   const severityStyles: Record<string, { border: string; bg: string; text: string; icon: any }> = {
     CRITICAL: { border: "border-rose-500/50", bg: "bg-rose-950/20", text: "text-rose-400", icon: AlertTriangle },
@@ -53,14 +60,10 @@ export default function RedlineViewer({ activeCaseId }: { activeCaseId: string }
     LOW: { border: "border-emerald-500/50", bg: "bg-emerald-950/20", text: "text-emerald-400", icon: CheckCircle2 },
   };
 
-  // Safely extract the Prisma JSON array
   const redlines: FlaggedClause[] = Array.isArray(documentData?.redlines) ? documentData.redlines : [];
-  
-  const filteredRedlines = activeFilter 
-    ? redlines.filter((r) => r.riskSeverity === activeFilter) 
-    : redlines;
+  const filteredRedlines = activeFilter ? redlines.filter((r) => r.riskSeverity === activeFilter) : redlines;
 
-  // Loading State
+  // EARLY RETURNS
   if (isLoading) {
     return (
       <div className="flex flex-col h-full w-full items-center justify-center space-y-4 opacity-70">
@@ -70,7 +73,6 @@ export default function RedlineViewer({ activeCaseId }: { activeCaseId: string }
     );
   }
 
-  // No Document State
   if (!documentData) {
     return (
       <div className="flex flex-col h-full w-full items-center justify-center p-8 text-center border border-dashed border-zinc-800/60 rounded-2xl bg-[#0c0c0e]/30">
@@ -83,14 +85,10 @@ export default function RedlineViewer({ activeCaseId }: { activeCaseId: string }
     );
   }
 
-  const isPendingExtraction = documentData.extractedText === "Pending extraction..." || !documentData.redlines;
+  const isPendingExtraction = documentData.extractedText === "Pending extraction..." || redlines.length === 0;
 
   return (
     <div className="w-full h-full flex flex-col lg:flex-row rounded-2xl overflow-hidden font-sans">
-      
-      {/* ========================================= */}
-      {/* LEFT PANE: ORIGINAL PDF IFRAME            */}
-      {/* ========================================= */}
       <div className="w-full lg:w-1/2 h-[50vh] lg:h-full border-b lg:border-b-0 lg:border-r border-zinc-800/60 flex flex-col bg-[#08080a]">
         <div className="border-b border-zinc-800/60 bg-zinc-900/40 px-6 py-4 flex justify-between items-center shrink-0">
           <span className="text-[10px] font-mono tracking-widest text-zinc-500 uppercase flex items-center gap-2">
@@ -100,25 +98,14 @@ export default function RedlineViewer({ activeCaseId }: { activeCaseId: string }
         </div>
         <div className="flex-1 w-full relative bg-zinc-950">
           {documentData.fileUrl ? (
-            <iframe 
-              src={`${documentData.fileUrl}#toolbar=0&view=FitH`} 
-              className="w-full h-full border-none invert-[0.9] hue-rotate-180 opacity-90 contrast-125"
-              title="Original Document View"
-            />
+            <iframe src={`${documentData.fileUrl}#toolbar=0&view=FitH`} className="w-full h-full border-none invert-[0.9] hue-rotate-180 opacity-90 contrast-125" title="Original Document View" />
           ) : (
-            <div className="absolute inset-0 flex items-center justify-center text-zinc-600 font-mono text-xs">
-              [No valid file URL mapped in database]
-            </div>
+            <div className="absolute inset-0 flex items-center justify-center text-zinc-600 font-mono text-xs">[No valid file URL mapped]</div>
           )}
         </div>
       </div>
 
-      {/* ========================================= */}
-      {/* RIGHT PANE: AI REDLINE EXTRACTOR          */}
-      {/* ========================================= */}
       <div className="w-full lg:w-1/2 h-[50vh] lg:h-full flex flex-col bg-[#0c0c0e]">
-        
-        {/* Header & Filter Controls */}
         <div className="border-b border-zinc-800/60 bg-zinc-900/20 px-6 py-4 shrink-0 space-y-4">
           <div className="flex justify-between items-center">
             <span className="text-[10px] font-mono tracking-widest text-zinc-500 uppercase">// Automated Risk Assessment</span>
@@ -132,39 +119,20 @@ export default function RedlineViewer({ activeCaseId }: { activeCaseId: string }
           
           {!isPendingExtraction && redlines.length > 0 && (
             <div className="flex gap-2 flex-wrap">
-              <button
-                onClick={() => setActiveFilter(null)}
-                className={`px-3 py-1 rounded-md text-[10px] font-mono border transition-all uppercase tracking-wider
-                  ${!activeFilter ? "bg-zinc-100 text-zinc-900 border-zinc-100 font-bold" : "border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/50"}
-                `}
-              >
-                ALL
-              </button>
+              <button onClick={() => setActiveFilter(null)} className={`px-3 py-1 rounded-md text-[10px] font-mono border transition-all uppercase tracking-wider ${!activeFilter ? "bg-zinc-100 text-zinc-900 border-zinc-100 font-bold" : "border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/50"}`}>ALL</button>
               {["CRITICAL", "HIGH", "MEDIUM", "LOW"].map((tier) => (
-                <button
-                  key={tier}
-                  onClick={() => setActiveFilter(tier)}
-                  className={`px-3 py-1 rounded-md text-[10px] font-mono border transition-all uppercase tracking-wider
-                    ${activeFilter === tier ? "bg-zinc-100 text-zinc-900 border-zinc-100 font-bold" : "border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/50"}
-                  `}
-                >
-                  {tier}
-                </button>
+                <button key={tier} onClick={() => setActiveFilter(tier)} className={`px-3 py-1 rounded-md text-[10px] font-mono border transition-all uppercase tracking-wider ${activeFilter === tier ? "bg-zinc-100 text-zinc-900 border-zinc-100 font-bold" : "border-zinc-800 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/50"}`}>{tier}</button>
               ))}
             </div>
           )}
         </div>
 
-        {/* Scrollable Redline Stack */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-zinc-800">
-          
           {isPendingExtraction ? (
              <div className="h-full flex flex-col items-center justify-center py-12">
                <Loader2 className="w-8 h-8 text-amber-500 animate-spin mb-4" />
                <p className="text-zinc-300 font-medium">QStash Engine Active</p>
-               <p className="text-zinc-500 text-xs mt-2 font-mono max-w-62.5 text-center text-balance">
-                 Awaiting structural analysis payload and vector verification from the legal agent...
-               </p>
+               <p className="text-zinc-500 text-xs mt-2 font-mono max-w-62.5 text-center text-balance">Awaiting structural analysis payload and vector verification from the legal agent...</p>
              </div>
           ) : filteredRedlines.length === 0 ? (
             <div className="flex flex-col items-center justify-center border border-dashed border-zinc-800/60 rounded-xl py-12 mt-4 bg-zinc-900/10">
@@ -179,52 +147,30 @@ export default function RedlineViewer({ activeCaseId }: { activeCaseId: string }
                 const Icon = style.icon;
 
                 return (
-                  <motion.div
-                    key={index}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    transition={{ delay: index * 0.05 }}
-                    className={`p-5 rounded-2xl border ${style.border} ${style.bg} flex flex-col gap-4 shadow-sm`}
-                  >
-                    {/* Header */}
+                  <motion.div key={index} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} className={`p-5 rounded-2xl border ${style.border} ${style.bg} flex flex-col gap-4 shadow-sm`}>
                     <div className="flex justify-between items-start gap-4 border-b border-zinc-800/40 pb-3">
                       <div className="flex items-center gap-2">
                         <Icon className={`w-4 h-4 ${style.text}`} />
-                        <span className={`text-[10px] font-mono uppercase tracking-widest font-bold ${style.text}`}>
-                          {clause.riskSeverity} RISK
-                        </span>
+                        <span className={`text-[10px] font-mono uppercase tracking-widest font-bold ${style.text}`}>{clause.riskSeverity} RISK</span>
                       </div>
-                      {clause.verified && (
-                        <span className="text-[9px] font-mono text-emerald-500 border border-emerald-900/50 bg-emerald-950/30 px-2 py-0.5 rounded tracking-widest">
-                          VERIFIED IN CORPUS
-                        </span>
+                      {clause.verified ? (
+                        <span className="text-[9px] font-mono text-emerald-500 border border-emerald-900/50 bg-emerald-950/30 px-2 py-0.5 rounded tracking-widest flex items-center gap-1"><ShieldCheck className="w-3 h-3"/> VERIFIED</span>
+                      ) : (
+                        <span className="text-[9px] font-mono text-amber-500 border border-amber-900/50 bg-amber-950/30 px-2 py-0.5 rounded tracking-widest flex items-center gap-1"><AlertTriangle className="w-3 h-3"/> UNVERIFIED HALLUCINATION</span>
                       )}
                     </div>
-
                     <div className="space-y-4">
-                      {/* Original Clause */}
                       <div>
-                        <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-widest mb-1.5">// Source Text:</p>
-                        <blockquote className="text-xs text-zinc-400 italic line-through decoration-rose-500/40 leading-relaxed bg-zinc-950/50 p-3 rounded-lg border border-zinc-900">
-                          "{clause.originalTextSnippet}"
-                        </blockquote>
+                        <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-widest mb-1.5">// Source Text Snippet:</p>
+                        <blockquote className={`text-xs text-zinc-400 italic leading-relaxed bg-zinc-950/50 p-3 rounded-lg border ${clause.verified ? "border-zinc-900" : "border-amber-900/30 text-amber-500/70"}`}>"{clause.originalTextSnippet}"</blockquote>
                       </div>
-
-                      {/* Suggested Redline */}
                       <div>
-                        <p className="text-[9px] font-mono text-emerald-500/70 uppercase tracking-widest mb-1.5">// Suggested Amendment:</p>
-                        <p className="text-xs text-zinc-200 font-medium leading-relaxed bg-emerald-950/10 p-3 rounded-lg border border-emerald-900/30">
-                          {clause.suggestedRedline}
-                        </p>
+                        <p className="text-[9px] font-mono text-emerald-500/70 uppercase tracking-widest mb-1.5">// Suggested Redline:</p>
+                        <p className="text-xs text-zinc-200 font-medium leading-relaxed bg-emerald-950/10 p-3 rounded-lg border border-emerald-900/30">{clause.suggestedRedline}</p>
                       </div>
-
-                      {/* Rationale */}
                       <div className="pt-2">
                         <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-widest mb-1.5">// Legal Rationale:</p>
-                        <p className="text-xs text-zinc-400 leading-relaxed font-light">
-                          {clause.rationale}
-                        </p>
+                        <p className="text-xs text-zinc-400 leading-relaxed font-light">{clause.rationale}</p>
                       </div>
                     </div>
                   </motion.div>
