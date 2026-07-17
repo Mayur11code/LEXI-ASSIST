@@ -1,9 +1,12 @@
+// src/app/page.tsx
 "use client";
 
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
-import IpBox from "./ip"; // Assuming this is your custom component
+import { useRouter } from "next/navigation"; // Added router for switching to login
+import IpBox from "./ip"; 
+import RegisterModal from "@/components/auth/RegisterModal"; // Added the new Modal
 
 const initialCards = [
   {
@@ -44,8 +47,10 @@ const initialCards = [
 ];
 
 export default function Home() {
+  const router = useRouter(); // Added router instance
   const [moved, setMoved] = useState<number[]>([]);
   const [scale, setScale] = useState(1);
+  const [isRegisterOpen, setIsRegisterOpen] = useState(false); // Added modal state
 
   useEffect(() => {
     const updateScale = () => {
@@ -143,21 +148,30 @@ export default function Home() {
               transition={{ delay: 1, duration: 0.5 }}
               className="mt-10 sm:mt-12 flex flex-col items-center gap-5"
             >
-              {/* Client Route */}
-              <Link
-                href="/login"
+              {/* 🔴 Client Route: Now triggers the Registration Modal */}
+              <button
+                onClick={() => setIsRegisterOpen(true)}
                 className="inline-block rounded-full border border-emerald-500/50 bg-emerald-950/20 px-8 py-3.5 text-xs uppercase tracking-[0.25em] text-emerald-400 transition-all hover:border-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300 hover:shadow-[0_0_20px_rgba(16,185,129,0.25)] sm:text-sm font-medium"
               >
                 INITIALIZE TRIAGE
-              </Link>
+              </button>
               
               {/* Lawyer Route */}
-              <Link
-                href="/login"
-                className="text-[10px] uppercase tracking-widest text-zinc-600 hover:text-zinc-300 transition-colors font-mono"
-              >
-                // Attorney Secure Login
-              </Link>
+              <div className="flex flex-col items-center gap-3">
+                <Link
+                  href="/attorney/join"
+                  className="text-[10px] uppercase tracking-widest text-zinc-500 hover:text-emerald-400 transition-colors font-mono mt-2"
+                >
+                  // Apply as Attorney Counsel
+                </Link>
+                <Link
+                  href="/login"
+                  className="text-[9px] uppercase tracking-widest text-zinc-700 hover:text-zinc-400 transition-colors font-mono"
+                >
+                  Existing Counsel Login
+                </Link>
+              </div>
+              
             </motion.div>
           )}
         </motion.div>
@@ -229,6 +243,16 @@ export default function Home() {
       <div className="absolute bottom-2 left-1/2 -translate-x-1/2 px-4 text-center text-[9px] uppercase tracking-[0.25em] text-zinc-700 sm:bottom-4 sm:text-[10px] lg:bottom-8 font-mono">
         LexiAssist AI • Next-Gen Legal Infrastructure
       </div>
+
+      {/* 🔴 Registration Modal Injection */}
+      <RegisterModal 
+        isOpen={isRegisterOpen} 
+        onClose={() => setIsRegisterOpen(false)} 
+        onSwitchToLogin={() => {
+          setIsRegisterOpen(false);
+          router.push('/login');
+        }} 
+      />
     </main>
   );
 }
