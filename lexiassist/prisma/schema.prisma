@@ -27,6 +27,7 @@ model User {
   role          UserRole        @default(CLIENT)
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
+  directMessages DirectMessage[]
   
   // Relations
   lawyerProfile LawyerProfile?
@@ -65,6 +66,7 @@ model CaseBrief {
   title          String
   rawDescription String         @db.Text
   status         CaseStatus     @default(TRIAGE)
+  directMessages DirectMessage[]
   
   // AI Generated Structured Outputs stored safely as JSON
   aiTimeline     Json?          // Structured chronological array of events
@@ -130,4 +132,21 @@ model Document {
   createdAt     DateTime   @default(now())
 
   @@index([caseBriefId])
+}
+
+model DirectMessage {
+  id          String   @id @default(cuid())
+  content     String   @db.Text
+  createdAt   DateTime @default(now())
+
+  // The case this message belongs to
+  caseBriefId String
+  caseBrief   CaseBrief @relation(fields: [caseBriefId], references: [id], onDelete: Cascade)
+
+  // The user (Client or Lawyer) who sent the message
+  senderId    String
+  sender      User      @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([caseBriefId])
+  @@index([createdAt])
 }
