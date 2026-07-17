@@ -2,11 +2,14 @@
 
 import { prisma } from "@/lib/prisma"; 
 
+// ==========================================
+// 1. UPLOAD & SAVE DOCUMENT
+// ==========================================
 export async function saveDocumentRecord(fileUrl: string, caseBriefId: string) {
   try {
     let validCaseBriefId = caseBriefId;
 
-    // Testing fallback: If we pass the dummy ID, find the first real case in the database to link against
+    // Dev Fallback: Map to an active case if the UI hasn't fully registered the ID
     if (validCaseBriefId === "test-case-id") {
       const activeBrief = await prisma.caseBrief.findFirst();
       
@@ -15,12 +18,12 @@ export async function saveDocumentRecord(fileUrl: string, caseBriefId: string) {
       } else {
         return { 
           success: false, 
-          error: "Database constraint error: You must start a chat session and create at least one Case Brief before you can attach documents to it!" 
+          error: "Database constraint error: No active Case Brief found to attach this document to." 
         };
       }
     }
 
-    // Now save with an ID that definitely exists in the parent table
+    // Strict Insertion: Creates the DB row and generates the UUID that the AI needs
     const newDoc = await prisma.document.create({
       data: {
         fileUrl: fileUrl,
@@ -29,10 +32,31 @@ export async function saveDocumentRecord(fileUrl: string, caseBriefId: string) {
       },
     });
 
-    console.log("Document successfully saved to DB:", newDoc.id);
     return { success: true, document: newDoc };
   } catch (error) {
-    console.error("Database Insert Error:", error);
-    return { success: false, error: "Failed to save document to database." };
+    console.error("[DB ERROR] Failed to save document:", error);
+    return { success: false, error: "Failed to persist document record in database." };
+  }
+}
+
+// ==========================================
+// 2. FETCH DOCUMENT FOR REDLINE VIEWER
+// ==========================================
+export async function getCaseDocument(caseBriefId: string) {
+  try {
+    // Fetches the most recent document payload, including the AI-generated redlines JSON blob
+    const document = await prisma.document.findFirst({
+      where: { caseBriefId },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (!document) {
+      return { success: false, error: "No documents mapped to this specific case." };
+    }
+
+    return { success: true, document };
+  } catch (error) {
+    console.error("[DB ERROR] Failed to fetch document:", error);
+    return { success: false, error: "Database retrieval failed." };
   }
 }
